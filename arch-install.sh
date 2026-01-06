@@ -3,6 +3,8 @@
 # Capture details before starting the automated process
 read -p "Enter hostname: " myhostname
 read -p "Enter username: " myusername
+read -sp "Enter password for $myusername: " mypassword
+echo """
 
 # Sync Clock
 timedatectl set-ntp true
@@ -52,8 +54,7 @@ systemctl enable NetworkManager
 
 # User Management
 useradd -m -G wheel "$myusername"
-echo "Set password for $myusername:"
-passwd "$myusername"
+echo "$myusername:$mypassword" | chpasswd
 
 # Sudo Configuration
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
