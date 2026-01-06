@@ -9,8 +9,7 @@ echo ""
 # --- 2. System Prep ---
 timedatectl set-ntp true
 
-# Partitioning /dev/nvme0n1
-# 1MiB offset for SSD alignment
+# Partitioning /dev/nvme0n1 (GPT, 512MB Boot, 4GB Swap, Rest Root)
 parted /dev/nvme0n1 mklabel gpt
 parted /dev/nvme0n1 mkpart "EFI" fat32 1MiB 513MiB
 parted /dev/nvme0n1 set 1 esp on
@@ -28,14 +27,16 @@ mount /dev/nvme0n1p3 /mnt
 mount --mkdir /dev/nvme0n1p1 /mnt/boot
 
 # --- 3. Base Installation ---
-# Includes base-devel for AUR, Intel drivers for 12th gen, and Hyprland stack
-pacstrap -K /mnt base base-devel linux linux-firmware intel-ucode mesa vulkan-intel intel-media-driver sudo git vim networkmanager hyprland xdg-desktop-portal-hyprland waybar hyprpaper wofi qt5-wayland qt6-wayland sddm
+# Core + Intel 12th Gen Video + Hyprland + Bluetooth + Network Applets
+pacstrap -K /mnt base base-devel linux linux-firmware intel-ucode mesa vulkan-intel \
+intel-media-driver sudo git vim networkmanager network-manager-applet \
+hyprland xdg-desktop-portal-hyprland waybar hyprpaper wofi qt5-wayland qt6-wayland \
+sddm bluez bluez-utils blueman
 
 # Generate fstab
 genfstab -U /mnt >> /mnt/etc/fstab
 
-# --- 4. Creating the Internal Setup Script ---
-# Using a temp script solves the permission and variable bugs
+# --- 4. Internal Setup Script ---
 cat <<INTERNAL_CONFIG > /mnt/setup.sh
 #!/bin/bash
 
@@ -50,10 +51,11 @@ echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "LIBVA_DRIVER_NAME=iHD" >> /etc/environment
 echo "XDG_SESSION_TYPE=wayland" >> /etc/environment
 
-# Networking & Login Manager
+# Enable Services
 echo "$myhostname" > /etc/hostname
 systemctl enable NetworkManager
 systemctl enable sddm
+systemctl enable bluetooth
 
 # User & Sudo Setup
 useradd -m -G wheel "$myusername"
@@ -61,9 +63,8 @@ echo "$myusername:$mypassword" | chpasswd
 sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 passwd -l root
 
-# Install Yay & Ghostty as the standard user
-# Setting HOME is critical for makepkg to work in chroot
-sudo -u "$myusername" bash <<AUR
+# Install Yay & Ghostty as User
+sudo -u "$myusername" bash <<'AUR'
 export HOME=/home/"$myusername"
 cd /home/"$myusername"
 
@@ -73,19 +74,24 @@ makepkg -si --noconfirm
 cd ..
 rm -rf yay
 
-# Install Ghostty from AUR
 yay -S --noconfirm ghostty
 
-# Pre-configure Hyprland to use Ghostty
+# Pre-configure Hyprland
 mkdir -p ~/.config/hypr
 echo "\\\$terminal = ghostty
+# Execute applets in background
+exec-once = nm-applet --indicator
+exec-once = blueman-applet
+exec-once = waybar
+
+# Keybinds
 bind = SUPER, Q, exec, \\\$terminal
 bind = SUPER, M, exit,
-bind = SUPER, R, exec, wofi --show drun" > ~/.config/hypr/hyprland.conf
-
+bind = SUPER, R, exec, wofi --show drun
+bind = SUPER, C, killactive," > ~/.config/hypr/hyprland.conf
 AUR
 
-# Fix permissions one last time
+# Final Permissions Fix
 chown -R "$myusername":"$myusername" /home/"$myusername"
 
 # Bootloader setup (systemd-boot)
@@ -108,6 +114,4 @@ arch-chroot /mnt /bin/bash /setup.sh
 rm /mnt/setup.sh
 
 echo "--------------------------------------------------"
-echo "Setup Complete! You can now type:"
-echo "umount -R /mnt"
-echo "reboot"
+echo "Setup Complete! Type: umount -R /mnt && reboot"
